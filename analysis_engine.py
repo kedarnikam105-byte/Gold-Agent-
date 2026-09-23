@@ -1,0 +1,12 @@
+import numpy as np,pandas as pd
+def enrich(df):
+ d=df.copy(); d.columns=[str(x).strip().title() for x in d.columns]; d=d.loc[:,~d.columns.duplicated(keep="last")]
+ for x in ["Open","High","Low","Close","Volume"]: d[x]=pd.to_numeric(d[x],errors="coerce")
+ d["Date"]=pd.to_datetime(d["Date"],errors="coerce",utc=True); d=d.dropna(subset=["Open","High","Low","Close"]).sort_values("Date").reset_index(drop=True)
+ c=d["Close"]; h=d["High"]; l=d["Low"]; d["EMA20"]=c.ewm(span=20,adjust=False).mean(); d["EMA50"]=c.ewm(span=50,adjust=False).mean(); z=c.diff(); up=z.clip(lower=0).ewm(alpha=1/14,adjust=False).mean(); dn=(-z.clip(upper=0)).ewm(alpha=1/14,adjust=False).mean(); d["RSI"]=100-100/(1+up/dn.replace(0,np.nan)); d["MACD"]=c.ewm(span=12,adjust=False).mean()-c.ewm(span=26,adjust=False).mean(); d["SIGNAL"]=d.MACD.ewm(span=9,adjust=False).mean(); tr=pd.concat([h-l,(h-c.shift()).abs(),(l-c.shift()).abs()],axis=1).max(axis=1); d["ATR"]=tr.ewm(alpha=1/14,adjust=False).mean(); d["VOL"]=c.pct_change().rolling(20).std()*100
+ return d.bfill().fillna(0)
+def reports(d):
+ x=d.iloc[-1]; q=d.tail(30); rsi=float(x.RSI); atr=float(x.ATR); hi=float(q.High.max()); lo=float(q.Low.min()); mom=max(-1,min(1,(rsi-50)/25)); trend=1 if x.Close>x.EMA20>x.EMA50 else -1 if x.Close<x.EMA20<x.EMA50 else 0; pattern=1 if x.Close>hi-.15*atr else -1 if x.Close<lo+.15*atr else 0
+ return {"Jarvis":{"role":"Momentum Analyst","score":mom,"report":f"RSI {rsi:.1f}; MACD spread {x.MACD-x.SIGNAL:.2f}"},"Tom":{"role":"Trend Analyst","score":trend,"report":f"Close {x.Close:.2f}; EMA20 {x.EMA20:.2f}; EMA50 {x.EMA50:.2f}"},"Criss":{"role":"Risk & Volatility Analyst","score":-min(1,float(x.VOL)/1.5),"report":f"ATR {atr:.2f}; volatility {x.VOL:.3f}%"},"KD":{"role":"Chart Pattern Analyst","score":pattern,"report":f"Support {lo:.2f}; resistance {hi:.2f}"},"Harry":{"role":"News & Macro Analyst","score":0,"report":"No licensed news feed connected; excluded from direction."}}
+def supervise(d,r):
+ x=d.iloc[-1]; score=.3*r["Jarvis"]["score"]+.3*r["Tom"]["score"]+.15*r["Criss"]["score"]+.25*r["KD"]["score"]; direction=1 if score>.22 else -1 if score<-.22 else 0; label="BUY SETUP" if direction>0 else "SELL SETUP" if direction<0 else "NO-TRADE / WAIT"; e=float(x.Close); a=max(float(x.ATR),.01); sl=e-direction*1.35*a if direction else e-a; tp=e+direction*2.2*a if direction else e+a; return {"label":label,"entry":e,"sl":sl,"tp":tp,"confidence":min(78,max(35,int(40+abs(score)*45))),"score":score}
